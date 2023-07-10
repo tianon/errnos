@@ -7,6 +7,7 @@ if [ -z "${GOLANG_SYS_DIR:-}" ]; then
 	GOLANG_SYS_DIR="$(mktemp -d)"
 	trap "$(printf 'rm -rf %q' "$GOLANG_SYS_DIR")" EXIT
 
+	# https://github.com/golang/sys/tags
 	git clone -b v0.10.0 --single-branch https://github.com/golang/sys.git "$GOLANG_SYS_DIR"
 fi
 
