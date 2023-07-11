@@ -14,39 +14,42 @@ fi
 # make sure glob expands reproducibly
 export LC_ALL=C
 
-gawk '
-	BEGIN {
-		print "package errnos"
-		print ""
-		print "import \"syscall\""
-		print ""
-		print "// Errnos is a doubly-nested map of GOOS or GOOS/GOARCH values to valid ERRNOs and their values (scraped from golang.org/x/sys/unix)"
-		print "var Errnos = map[string]map[string]syscall.Errno{"
-	}
-
-	FNR == 1 {
-		if (open) { printf "\t},\n"; open = 0 }
-		if (match(FILENAME, /zerrors_([a-z0-9]+)(_([a-z0-9]+))?[.]go$/, a)) {
-			if (a[3] != "") {
-				a[1] = a[1] "/" a[3]
-			}
-			printf "\t\"%s\": {\n", a[1]
-			open = 1
-		}
-		else {
-			printf "warning: skipping %s\n", FILENAME > "/dev/stderr"
-			nextfile
-		}
-	}
-
-	# match lines like "EXXX = syscall.Errno(0xNN)" or "EXXX = Errno(NN)" (Errno in the sys/unix package is an alias for syscall.Errno)
-	match($0, /[[:space:]](E[A-Z0-9]+)[[:space:]]*=[[:space:]]*((syscall[.])?Errno[(](0x)?[0-9a-f]+[)])([[:space:]]|$)/, a) {
-		if (a[3] == "") { a[2] = "syscall." a[2] }
-		printf "\t\t\"%s\": %s,\n", a[1], a[2]
-	}
-
-	END {
-		if (open) { printf "\t},\n"; open = 0 }
-		print "}"
-	}
+jq -rR '
+	[
+		inputs
+		# match lines like "EXXX = syscall.Errno(0xNN)" or "EXXX = Errno(NN)" (Errno in the sys/unix package is an alias for syscall.Errno)
+		| capture("[[:space:]](?<name>E[A-Z0-9]+)[[:space:]]*=[[:space:]]*((syscall[.])?Errno[(](?<value>(0x)?[0-9a-f]+)[)])([[:space:]]|$)")
+		# upgrade to include goos and goarch from the filename
+		| . += (input_filename | capture("zerrors_(?<goos>[a-z0-9]+)(_(?<goarch>[a-z0-9]+))?[.]go$"))
+	]
+	| (reduce .[] as $o ({}; select($o.goarch) | .[$o.goos] += [$o.goarch])) as $arches
+	| reduce .[] as $o ({}; .[$o.goos][$o.goarch // $arches[$o.goos][]][$o.name] = $o.value)
+	| [
+		"package errnos",
+		"",
+		"import \"syscall\"",
+		"",
+		"// Errnos is a triply-nested map of GOOS -> GOARCH -> ERRNO define -> ERRNO values (scraped from golang.org/x/sys/unix)",
+		"var Errnos = map[string]map[string]map[string]syscall.Errno{",
+		(
+			to_entries[] |
+			"\t\"" + .key + "\": {", # GOOS
+			(
+				.value | to_entries[] |
+				"\t\t\"" + .key + "\": {", # GOARCH
+				(
+					.value
+					| (keys_unsorted | map(length) | max) as $longest # find the longest key so we can gofmt properly
+					| to_entries[]
+					| "\t\t\t\"" + .key + "\": " + (" " * ($longest - (.key | length))) + "syscall.Errno(" + .value + "),"
+				),
+				"\t\t},",
+				empty
+			),
+			"\t},",
+			empty
+		),
+		"}",
+		empty
+	] | join("\n")
 ' "$GOLANG_SYS_DIR"/unix/zerrors_*.go > zerrors.go
