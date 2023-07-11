@@ -25,6 +25,12 @@ jq -rR '
 	| (reduce .[] as $o ({}; select($o.goarch) | .[$o.goos] += [$o.goarch])) as $arches
 	| reduce .[] as $o ({}; .[$o.goos][$o.goarch // $arches[$o.goos][]][$o.name] = $o.value)
 	| [
+		"//",
+		"// STOP: This file is generated from zerrors_*.go files in golang.org/x/sys/unix via generate.sh!",
+		"//",
+		"//   (Probably *technically* not copyrightable code as such since their code is generated directly from kernel sources so it is artifact conversion all the way down, but if so: Copyright (c) 2009 The Go Authors. All rights reserved.)",
+		"//",
+		"",
 		"package errnos",
 		"",
 		"import \"syscall\"",
